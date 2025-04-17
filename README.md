@@ -1,148 +1,106 @@
+TaskSpooler
+===========
 
-# TaskSpooler
+TaskSpooler is a lightweight UNIX domain socket-based task queue and runner.
+It enables you to submit shell commands for asynchronous execution and monitor their status easily.
+Ideal for simple distributed job execution scenarios.
 
-A lightweight task spooling system using Unix sockets for queuing and executing shell commands asynchronously. Useful for queuing system administration tasks or running background jobs in a controlled way.
+Features
+--------
 
-## Components
+- Minimalistic, self-contained Python3-based task runner
+- Queue shell commands via a UNIX socket
+- View job status, output, error, and exit code
+- Includes timestamps with timezone support (e.g., EST)
+- Simple JSON protocol for communication
+- Configurable via environment variables
 
-### 1. taskspoold.py  Task Spooler Server
+Components
+----------
 
-The server manages job execution using a Unix socket and processes commands in parallel (configurable). Each job's stdout/stderr and metadata are stored for querying.
+- taskspoold — Server daemon that listens on a UNIX socket and runs commands
+- taskspoolctl — Client utility to queue commands and check status
 
-### 2. taskspoolctl.py  Task Spooler Client
+Installation
+------------
 
-The client connects to the server using the Unix socket and allows you to:
-- Submit new jobs
-- View all jobs
-- View a specific job's status and output
+You can clone and run directly:
 
-## Configuration
+    git clone https://github.com/your-org/taskspooler.git
+    cd taskspooler
+    chmod +x taskspoold taskspoolctl
 
-You can configure paths via environment variables:
+Configuration
+-------------
+
+You can override these environment variables:
 
 | Variable Name         | Description                            | Default Value            |
 |-----------------------|----------------------------------------|--------------------------|
 | TASKSPOOL_SOCKET      | Unix socket path used by server/client | /tmp/taskspool.sock      |
 | TASKSPOOL_LOG_DIR     | Directory for job logs (future use)    | /tmp/taskspool_logs      |
 | TASKSPOOL_TEMP_DIR    | Temp directory for stdout/stderr files | /tmp/taskspool_temp      |
+| TASKSPOOL_TZ          | Timezone used for timestamps (e.g., EST) |   America/New_York                |
 
-Example (Linux/macOS):
+Usage
+-----
 
-```bash
-export TASKSPOOL_SOCKET=/tmp/mysock.sock
-export TASKSPOOL_LOG_DIR=/var/log/taskspooler
-export TASKSPOOL_TEMP_DIR=/var/tmp/taskspooler
-```
-
-## Getting Started
-
-### 1. Start the Server
+1. Start the Server
 
 ```bash
-python3 taskspoold.py
+./taskspoold.py
 ```
 
-The server will listen for incoming jobs on the socket specified in TASKSPOOL_SOCKET.
+Server listens on the socket and accepts task or status queries.
 
-### 2. Queue a Command
+2. Queue a Command
 
 ```bash
-python3 taskspoolctl.py "queue: ls -lh /var"
-python3 taskspoolctl.py "queue: cd /var && ls -ltr"
-python3 taskspoolctl.py "queue: cd /var ; ls -ltr"
+./taskspoolctl.py "queue: ls -lh /var"
+./taskspoolctl.py "queue: cd /var && ls -ltr"
+./taskspoolctl.py "queue: cd /var ; ls -ltr"
 ```
 
-You will receive a confirmation message like:
 
+3. Check Status of All Jobs
+
+```bash
+./taskspoolctl.py status:all
+```
+
+Example response:
 ```json
-{
-  "message": "Job started: ls -lh /var"
-}
-```
-
-### 3. View All Job Statuses
-
-```bash
-python3 taskspoolctl.py "status: all"
-```
-
-Sample output:
-```json
-{
-  "queue_length": 0,
-  "active_workers": 1,
-  "max_concurrent_jobs": 3,
-  "load_avg": [0.12, 0.34, 0.56],
-  "last_job_id": 5,
-  "jobs": [
     {
-      "job_id": 3,
-      "status": "completed",
-      "exit_code": 0,
-      "command": "ls -lh /var"
+      "queue_length": 0,
+      "active_workers": 1,
+      "max_concurrent_jobs": 3,
+      "load_avg": [0.2, 0.3, 0.1],
+      "last_job_id": 5,
+      "jobs": [
+        {
+          "job_id": 4,
+          "status": "completed",
+          "exit_code": 0,
+          "command": "hostname",
+          "queued_time": "2025-04-17T10:15:03 EST",
+          "run_time": "2025-04-17T10:15:04 EST"
+        }
+      ]
     }
-  ]
-}
 ```
-
-### 4. View a Specific Job's Output
+4. Check Status of a Specific Job
 
 ```bash
-python3 taskspoolctl.py "status: 3"
+ ./taskspoolctl.py "status: 3"
 ```
 
-Sample output:
-```json
-{
-  "job_id": 3,
-  "status": "completed",
-  "exit_code": 0,
-  "command": "ls -lh /var",
-  "stdout": "total 12\ndrwxr-xr-x ...",
-  "stderr": ""
-}
-```
 
-## Features
+Permissions
+-----------
 
-- Queue and run shell commands
-- View stdout and stderr for each job
-- View current load, queue length, and job history
-- Fully configurable via environment variables
-- Lightweight and portable - just Python 3 and standard libraries
+Make sure only trusted users can access the UNIX socket. Use file permissions or socket ownership to restrict access.
 
-## Testing
-
-You can test with commands that produce output:
-
-```bash
-python3 taskspoolctl.py "queue: echo 'Hello World'"
-python3 taskspoolctl.py "queue: uname -a"
-python3 taskspoolctl.py "queue: sleep 10"
-```
-
-Then check status:
-
-```bash
-python3 taskspoolctl.py "status: all"
-```
-
-## Future Improvements
-
-- Persistent job storage
-- Retry/timeout support
-- Job cancellation
-- Prioritization of jobs
-
-## Cleanup
-
-To remove all temp files and reset:
-```bash
-rm -f /tmp/taskspool.sock
-rm -rf /tmp/taskspool_logs/*
-rm -rf /tmp/taskspool_temp/*
-```
-
-## License
+License
+-------
 
 MIT License

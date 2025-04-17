@@ -7,11 +7,15 @@ import threading
 import json
 import time
 import sys
+from datetime import datetime
+from zoneinfo import ZoneInfo  # Python 3.9+
 
 # Define environment variables for socket, log and temp directories
 SOCKET_PATH = os.environ.get("TASKSPOOL_SOCKET", "/tmp/taskspool.sock")
 LOG_DIR = os.environ.get("TASKSPOOL_LOG_DIR", "/tmp/taskspool_logs")
 TEMP_DIR = os.environ.get("TASKSPOOL_TEMP_DIR", "/tmp/taskspool_temp")
+TIMEZONE_NAME = os.environ.get("TASKSPOOL_TZ", "America/New_York")
+LOCAL_ZONE = ZoneInfo(TIMEZONE_NAME)
 
 # Create log and temp directories if they don't exist
 os.makedirs(LOG_DIR, exist_ok=True)
@@ -23,29 +27,35 @@ job_queue = []
 job_metadata = {}
 job_id_counter = 1
 
+def current_time():
+    return datetime.now(LOCAL_ZONE).strftime("%Y-%m-%dT%H:%M:%S %Z")
+
 def run_command(command, job_id):
     """Run the command and save stdout, stderr, and exit code"""
     out_file = os.path.join(TEMP_DIR, f"job-{job_id}.out")
     err_file = os.path.join(TEMP_DIR, f"job-{job_id}.err")
 
-    with open(out_file, "w") as stdout, open(err_file, "w") as stderr:
-        try:
-            # Execute the command
-            process = subprocess.Popen(command, shell=True, stdout=stdout, stderr=stderr)
-            process.wait()
-            exit_code = process.returncode
-        except Exception as e:
-            exit_code = 1
-            stderr.write(f"Error executing command: {str(e)}")
+    run_time = current_time()
+    print(f"[{run_time}] [Job {job_id}] Command: {command}")
 
-    # Store job metadata
-    job_metadata[job_id] = {
-        "status": "completed" if exit_code == 0 else "failed",
-        "exit": exit_code,
-        "cmd": command,
-        "out_file": out_file,
-        "err_file": err_file
-    }
+    with open(out_file, "w") as stdout_file, open(err_file, "w") as stderr_file:
+        process = subprocess.Popen(
+            command,
+            shell=True,
+            stdout=stdout_file,
+            stderr=stderr_file,
+            text=True
+        )
+        process.wait()
+        exit_code = process.returncode
+
+    # Update job metadata
+    if job_id in job_metadata:
+        job_metadata[job_id]["run_time"] = run_time
+        job_metadata[job_id]["status"] = "completed" if exit_code == 0 else "failed"
+        job_metadata[job_id]["exit"] = exit_code
+        job_metadata[job_id]["out_file"] = out_file
+        job_metadata[job_id]["err_file"] = err_file
 
 def handle_client_connection(conn, addr):
     """Handle commands from clients"""
@@ -71,7 +81,9 @@ def handle_client_connection(conn, addr):
                     "job_id": jid,
                     "status": meta["status"],
                     "exit_code": meta["exit"],
-                    "command": meta["cmd"]
+                    "command": meta["cmd"],
+                    "queued_time": meta.get("queued_time"),
+                    "run_time": meta.get("run_time")
                 })
 
             conn.sendall(json.dumps(result, indent=2).encode())
@@ -97,7 +109,9 @@ def handle_client_connection(conn, addr):
                         "exit_code": meta["exit"],
                         "command": meta["cmd"],
                         "stdout": out_data,
-                        "stderr": err_data
+                        "stderr": err_data,
+                        "queued_time": meta.get("queued_time"),
+                        "run_time": meta.get("run_time")
                     }
                     conn.sendall(json.dumps(job_info, indent=2).encode())
                 else:
@@ -108,37 +122,48 @@ def handle_client_connection(conn, addr):
     elif data.startswith("queue:"):
         command = data[6:].strip()  # Remove 'queue:' prefix
 
+        job_id = job_id_counter
+        job_id_counter += 1
+        queued_time = current_time()
+        job_metadata[job_id] = {
+            "status": "queued",
+            "exit": None,
+            "cmd": command,
+            "queued_time": queued_time,
+            "run_time": None,
+            "out_file": None,
+            "err_file": None
+        }
+
         if len(job_queue) >= MAX_CONCURRENT_JOBS:
-            job_queue.append(command)
+            job_queue.append((command, job_id))
             conn.sendall(json.dumps({"message": f"Job queued: {command}"}).encode())
         else:
-            # Run command immediately
-            job_id = job_id_counter
-            job_id_counter += 1
             threading.Thread(target=run_command, args=(command, job_id)).start()
             conn.sendall(json.dumps({"message": f"Job started: {command}"}).encode())
 
     else:
         conn.sendall(json.dumps({"error": "Unknown command"}).encode())
 
+
+# === Main Server Loop ===
 def start_server():
-    """Start the task spooler server"""
-    with socket.socket(socket.AF_UNIX, socket.SOCK_STREAM) as server:
-        try:
-            os.remove(SOCKET_PATH)  # Remove existing socket if any
-        except FileNotFoundError:
-            pass
+    if os.path.exists(SOCKET_PATH):
+        os.remove(SOCKET_PATH)
 
-        server.bind(SOCKET_PATH)
-        server.listen()
+    server = socket.socket(socket.AF_UNIX, socket.SOCK_STREAM)
+    server.bind(SOCKET_PATH)
+    server.listen()
+    print(f"Task Spooler is listening on {SOCKET_PATH}")
 
-        print(f"Server listening on {SOCKET_PATH}")
-
+    try:
         while True:
             conn, addr = server.accept()
-            with conn:
-                print("Connected by", addr)
-                handle_client_connection(conn, addr)
+            threading.Thread(target=handle_client_connection, args=(conn,addr), daemon=True).start()
+    finally:
+        server.close()
+        if os.path.exists(SOCKET_PATH):
+            os.remove(SOCKET_PATH)
 
 if __name__ == "__main__":
     start_server()
