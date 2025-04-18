@@ -1,9 +1,12 @@
 TaskSpooler
 ===========
 
-TaskSpooler is a lightweight UNIX domain socket-based task queue and runner.
-It enables you to submit shell commands for asynchronous execution and monitor their status easily.
-Ideal for simple distributed job execution scenarios.
+- TaskSpooler is a lightweight UNIX domain socket-based task queue and runner. Works on Mac too.
+- It enables you to submit shell commands for asynchronous execution and monitor their status easily.
+- Ideal for simple distributed job execution scenarios in a single VM.
+
+<img src="architecture.jpg" alt="Architecture" width="1200"/>
+
 
 Features
 --------
@@ -48,12 +51,13 @@ Usage
 1. Start the Server
 
 ```bash
-./taskspoold.py
+./taskspoold.py # starts the server in foreground. Terminal needs to kept open
+nohup ./taskspoold.py > taskspoold.log 2>&1 & # runs in the background and logs are written to file
 ```
 
 Server listens on the socket and accepts task or status queries.
 
-2. Queue a Command
+2. Queue a Command from different terminal
 
 ```bash
 ./taskspoolctl.py "queue: ls -lh /var"
